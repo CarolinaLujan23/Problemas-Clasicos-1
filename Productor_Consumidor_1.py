@@ -41,14 +41,24 @@ class listaFinita(list):
     def __init__(self, max_elementos):
             self.max_elementos = max_elementos
             super().__init__()
+            self.condition = threading.Condition()
 
     def pop(self, index):
-        assert len(self) != 0, "lista vacia"
-        return super().pop(index)
+        self.condition.acquire()
+        while len(self) == 0:
+                self.condition.wait()
+        elemento = super().pop(index)
+        self.condition.notify(1)
+        self.condition.release()        
+        return elemento
 
     def append(self, item):
-        assert len(self) < self.max_elementos,"lista llena"
+        self.condition.acquire()
+        while len(self) == self.max_elementos:
+            self.condition.wait()
         super().append(item)
+        self.condition.notify(1)
+        self.condition.release()  
 
     def insert(self, index, item):
         assert index < self.max_elementos, "indice invalido"
@@ -66,25 +76,39 @@ class Productor(threading.Thread):
     def __init__(self, lista = listaFinita):
         super().__init__()
         self.lista = lista
+        self.lock = threading.Lock()
 
     def run(self):
         while True:
-            self.lista.append(random.randint(0,100))
-            logging.info(f'produjo el item: {self.lista[-1]}')
-            time.sleep(random.randint(1,5))
+            self.lock.acquire()
+            try:
+                while self.lista.full():
+                    pass
+            finally:    
+                self.lista.append(random.randint(0,100))
+                logging.info(f'produjo el item: {self.lista[-1]}')
+                time.sleep(random.randint(1,5))
+                self.lock.release()
 
 
 class Consumidor(threading.Thread):
     def __init__(self, lista):
         super().__init__()
         self.lista = lista
+        self.lock = threading.Lock()
 
 
     def run(self):
         while True:
-            elemento = self.lista.pop(0)
-            logging.info(f'consumio el item {elemento}')
-            time.sleep(random.randint(1,5))
+            self.lock.acquire()
+            try:
+                while len(self.lista) == 0:
+                    pass
+            finally:    
+                    elemento = self.lista.pop(0)
+                    logging.info(f'consumio el item {elemento}')
+                    time.sleep(random.randint(1,5))
+                    self.lock.release()
 
 def main():
     hilos = []
@@ -99,7 +123,7 @@ def main():
         logging.info(f'Arrancando productor {productor.name}')
         productor.start()
 
-        logging.info(f'Arrancando productor {consumidor.name}')
+        logging.info(f'Arrancando consumidor {consumidor.name}')
         consumidor.start()
 
     for h in hilos:
